@@ -1,3 +1,3 @@
 # Flappy Bird (using Pygame)
 
-same as *Flappy Bird* except with my modification
+same as *Flappy Bird*, but I add more features base on it.
