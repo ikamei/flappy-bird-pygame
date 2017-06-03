@@ -16,6 +16,61 @@ ANIMATION_SPEED = 0.18  # pixels per millisecond
 WIN_WIDTH = 284 * 2     # BG image size: 284x512 px; tiled twice
 WIN_HEIGHT = 512
 
+class Coin(pygame.sprite.Sprite):
+    ADD_INTERVAL = 500
+    WIDTH = HEIGHT = 32
+
+    def __init__(self, x, y, images):
+        """Initialise a new Bird instance.
+        """
+        super(Coin, self).__init__()
+        self.x, self.y = x, y
+        self._img_bright, self._img_dark = images
+        self._mask_bright = pygame.mask.from_surface(self._img_bright)
+        self._mask_dark = pygame.mask.from_surface(self._img_dark)
+
+    def update(self, delta_frames=1):
+        self.x -= ANIMATION_SPEED * frames_to_msec(delta_frames)
+
+    @property
+    def image(self):
+        """Get a Surface containing this bird's image.
+
+        This will decide whether to return an image where the bird's
+        visible wing is pointing upward or where it is pointing downward
+        based on pygame.time.get_ticks().  This will animate the flapping
+        bird, even though pygame doesn't support animated GIFs.
+        """
+        if pygame.time.get_ticks() % 500 >= 250:
+            return self._img_bright
+        else:
+            return self._img_dark
+
+    @property
+    def mask(self):
+        """Get a bitmask for use in collision detection.
+
+        The bitmask excludes all pixels in self.image with a
+        transparency greater than 127."""
+        if pygame.time.get_ticks() % 500 >= 250:
+            return self._mask_bright
+        else:
+            return self._mask_dark
+
+    @property
+    def rect(self):
+        """Get the Rect which contains this PipePair."""
+        return Rect(self.x, self.y, PipePair.WIDTH, PipePair.PIECE_HEIGHT)
+
+    def collides_with(self, bird):
+        """Get whether the bird collides with a pipe in this PipePair.
+
+        Arguments:
+        bird: The Bird which should be tested for collision with this
+            PipePair.
+        """
+        return pygame.sprite.collide_mask(self, bird)
+
 
 class Bird(pygame.sprite.Sprite):
     """Represents the bird controlled by the player.
@@ -44,9 +99,9 @@ class Bird(pygame.sprite.Sprite):
     """
 
     WIDTH = HEIGHT = 32
-    SINK_SPEED = 0.18
+    SINK_SPEED = 0.18 - 0.05
     CLIMB_SPEED = 0.3
-    CLIMB_DURATION = 333.3
+    CLIMB_DURATION = 333.3 - 50
 
     def __init__(self, x, y, msec_to_climb, images):
         """Initialise a new Bird instance.
@@ -66,6 +121,11 @@ class Bird(pygame.sprite.Sprite):
         super(Bird, self).__init__()
         self.x, self.y = x, y
         self.msec_to_climb = msec_to_climb
+        self._img_wingup, self._img_wingdown = images
+        self._mask_wingup = pygame.mask.from_surface(self._img_wingup)
+        self._mask_wingdown = pygame.mask.from_surface(self._img_wingdown)
+
+    def set_images( self, images ) :
         self._img_wingup, self._img_wingdown = images
         self._mask_wingup = pygame.mask.from_surface(self._img_wingup)
         self._mask_wingdown = pygame.mask.from_surface(self._img_wingdown)
@@ -176,7 +236,7 @@ class PipePair(pygame.sprite.Sprite):
         self.image.fill((0, 0, 0, 0))
         total_pipe_body_pieces = int(
             (WIN_HEIGHT -                  # fill window from top to bottom
-             3 * Bird.HEIGHT -             # make room for bird to fit through
+             5 * Bird.HEIGHT -             # make room for bird to fit through
              3 * PipePair.PIECE_HEIGHT) /  # 2 end pieces + 1 body piece
             PipePair.PIECE_HEIGHT          # to get number of pipe pieces
         )
@@ -280,7 +340,9 @@ def load_images():
             # images for animating the flapping bird -- animated GIFs are
             # not supported in pygame
             'bird-wingup': load_image('bird_wing_up.png'),
-            'bird-wingdown': load_image('bird_wing_down.png')}
+            'bird-wingdown': load_image('bird_wing_down.png'),
+            'coin-bright': load_image('coin_bright.png'),
+            'coin-dark': load_image('coin_dark.png')}
 
 
 def frames_to_msec(frames, fps=FPS):
@@ -325,6 +387,8 @@ def main():
                 (images['bird-wingup'], images['bird-wingdown']))
 
     pipes = deque()
+    coins = deque()
+    coint_count = 0
 
     frame_clock = 0  # this counter is only incremented if the game isn't paused
     score = 0
@@ -337,6 +401,10 @@ def main():
         if not (paused or frame_clock % msec_to_frames(PipePair.ADD_INTERVAL)):
             pp = PipePair(images['pipe-end'], images['pipe-body'])
             pipes.append(pp)
+
+        if not (paused or frame_clock % msec_to_frames(Coin.ADD_INTERVAL)):
+            coin = Coin( WIN_WIDTH - 1, randint(1, WIN_HEIGHT), (images['coin-bright'], images['coin-dark']))
+            coins.append( coin )
 
         for e in pygame.event.get():
             if e.type == QUIT or (e.type == KEYUP and e.key == K_ESCAPE):
@@ -353,9 +421,14 @@ def main():
 
         # check for collisions
         pipe_collision = any(p.collides_with(bird) for p in pipes)
-        if pipe_collision or 0 >= bird.y or bird.y >= WIN_HEIGHT - Bird.HEIGHT:
+        if 0 >= bird.y :
+            bird.y = 0
+        if pipe_collision or bird.y >= WIN_HEIGHT - Bird.HEIGHT:
             done = True
 
+        coin_collision = any(coin.collides_with(bird) for coin in coins)
+
+        # render
         for x in (0, WIN_WIDTH / 2):
             display_surface.blit(images['background'], (x, 0))
 
@@ -365,6 +438,23 @@ def main():
         for p in pipes:
             p.update()
             display_surface.blit(p.image, p.rect)
+
+        while coins and coins[0].x < 0 :
+            coins.popleft()
+
+        if coin_collision :
+            coins.popleft()
+            coint_count += 1
+#            print( "coint_count = %d / %d" % (coint_count, len(coins)) )
+
+        for coin in coins:
+            coin.update()
+            display_surface.blit(coin.image, coin.rect)
+
+#        if coint_count >= 20 and coint_count < 40:
+#            bird.set_images( (images['bird-wingup'], images['bird-wingdown']) )
+#        elif coint_count >= 40 and coint_count < 60:
+#            bird.set_images( (images['bird-wingup'], images['bird-wingdown']) )
 
         bird.update()
         display_surface.blit(bird.image, bird.rect)
@@ -378,6 +468,10 @@ def main():
         score_surface = score_font.render(str(score), True, (255, 255, 255))
         score_x = WIN_WIDTH/2 - score_surface.get_width()/2
         display_surface.blit(score_surface, (score_x, PipePair.PIECE_HEIGHT))
+        score_surface = score_font.render("Coin : %d" % coint_count, True, (255, 255, 255))
+        score_x = WIN_WIDTH/3 - score_surface.get_width()/2
+        display_surface.blit(score_surface, (score_x, PipePair.PIECE_HEIGHT))
+
 
         pygame.display.flip()
         frame_clock += 1
